@@ -15,8 +15,8 @@
 void test_validate_my_username()
 {
     /**
-     * TODO: Replace the line below with your code here as described above to verify your /conf/username.txt 
-     * config file and my_username() functions are setup properly
+     * extract username from the configuration file and compare it to the hard coded return of my_username/username.txt 
+     * assert fails is they are different
      */
-    TEST_ASSERT_TRUE_MESSAGE(false,"AESD students, please fix me!");
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(malloc_username_from_conf_file(), my_username(), "Invalid Username");
 }
