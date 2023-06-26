@@ -2,10 +2,7 @@
 # Assignment 1: finder shell script
 # Author: David Peter
 
-# Exit immediately if a command exits with a non-zero status
-set -e
-# Treat unset variables as an error when substituting
-set -u
+
 # Commands for text style
 BOLD=$(tput bold)
 NORMAL=$(tput sgr0)
