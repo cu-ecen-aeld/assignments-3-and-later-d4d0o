@@ -1,0 +1,5 @@
+aarch64-none-linux-gnu-gcc: internal compiler error: Segmentation fault signal terminated program cc1
+Please submit a full bug report,
+with preprocessed source if appropriate.
+See <https://bugs.linaro.org/> for instructions.
+make: *** [Makefile:9: writer] Error 4
