@@ -1,5 +1,5 @@
 #!/bin/sh
-# Assignment 1: writer shell script
+# Assignment 2: writer shell script
 # Author: David Peter
 
 
@@ -21,19 +21,9 @@ else
     WRITESTR=$2
 fi
 
-# creation of the absolute path if it doesn't exist
-if [ ! -d $(dirname $WRITEFILE) ]
-then
-    mkdir -p $(dirname ${WRITEFILE})
-
-    if [ $? -ne 0 ]
-    then
-        echo "cannot crate $(dirname ${WRITEFILE})"
-    fi
-fi
-
 # creation of a file with its content
-echo ${WRITESTR} > ${WRITEFILE}
+echo "!!! Use the C version of writer !!!"
+./writer ${WRITEFILE} ${WRITESTR}
 
 if [ $? -ne 0 ]
 then
