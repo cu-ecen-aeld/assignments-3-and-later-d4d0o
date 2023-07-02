@@ -1,5 +1,1 @@
-aarch64-none-linux-gnu-gcc: internal compiler error: Segmentation fault signal terminated program cc1
-Please submit a full bug report,
-with preprocessed source if appropriate.
-See <https://bugs.linaro.org/> for instructions.
-make: *** [Makefile:9: writer] Error 4
+writer: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, for GNU/Linux 3.7.0, with debug_info, not stripped
