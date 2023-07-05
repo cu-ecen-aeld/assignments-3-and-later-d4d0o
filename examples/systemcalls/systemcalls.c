@@ -1,3 +1,5 @@
+#include <stdlib.h>
+#include <unistd.h>
 #include "systemcalls.h"
 
 /**
@@ -11,13 +13,17 @@ bool do_system(const char *cmd)
 {
 
 /*
- * TODO  add your code here
- *  Call the system() function with the command set in the cmd
+ * Call the system() function with the command set in the cmd
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
+    int ret = -1;
 
-    return true;
+    ret = system(cmd);
+    if (0 == ret)
+        return true;
+    else
+        return false;
 }
 
 /**
@@ -45,19 +51,20 @@ bool do_exec(int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
 
 /*
- * TODO:
- *   Execute a system command by calling fork, execv(),
+ * Execute a system command by calling fork, execv(),
  *   and wait instead of system (see LSP page 161).
  *   Use the command[0] as the full path to the command to execute
  *   (first argument to execv), and use the remaining arguments
  *   as second argument to the execv() command.
  *
 */
+    int ret =-1;
+
+    ret = execv(command[0], &command[1]);
+    if (-1 == ret)
+        return false;
 
     va_end(args);
 
@@ -80,8 +87,8 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
+
+    // babbbaqaahahahaha
     command[count] = command[count];
 
 
@@ -94,6 +101,6 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
 */
 
     va_end(args);
-
+    return false;
     return true;
 }
