@@ -1,5 +1,10 @@
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <libgen.h>
+#include <linux/limits.h>
+#include <string.h>
+#include <fcntl.h>
 #include "systemcalls.h"
 
 /**
@@ -60,15 +65,47 @@ bool do_exec(int count, ...)
  *   as second argument to the execv() command.
  *
 */
-    int ret =-1;
+    int status;
+    pid_t pid = -1;
 
-    ret = execv(command[0], &command[1]);
-    if (-1 == ret)
+    fflush(stdout);
+    pid = fork ();
+    if (-1 == pid) {
+        /* massive failure */
+        perror("fork");
+        va_end(args);
         return false;
+    }
+    else if (0 == pid) {
+        /* with a pid of 0 we are in the child process, let's execute our commands */
 
+        /* save of the full path */
+        char path[PATH_MAX];
+        strcpy(path, command[0]);
+
+        /* cut the full path into the basename only */
+        command[0] = basename(command[0]);
+
+        execv(path, &command[0]);
+
+        exit(1);
+    }
+
+    if (-1 == waitpid (pid, &status, 0)) {
+        /* there was a problem with the child process */
+        va_end(args);
+        return false;
+    }
     va_end(args);
 
-    return true;
+    if (WIFEXITED (status)) {
+        /* WIFEXITED will be true if the child terminated normally */
+        if (0 == WEXITSTATUS (status))
+            return true;
+    }
+
+    /* the child have not terminated normally we would have returned true already */
+    return false;
 }
 
 /**
@@ -88,19 +125,70 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     }
     command[count] = NULL;
 
-    // babbbaqaahahahaha
-    command[count] = command[count];
-
-
 /*
- * TODO
- *   Call execv, but first using https://stackoverflow.com/a/13784315/1446624 as a refernce,
+ * Call execv, but first using https://stackoverflow.com/a/13784315/1446624 as a refernce,
  *   redirect standard out to a file specified by outputfile.
  *   The rest of the behaviour is same as do_exec()
  *
 */
 
+    int status;
+    pid_t pid = -1;
+
+    int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+    if (fd < 0) {
+        /* massive failure */
+        perror("open");
+        va_end(args);
+        return false;
+    }
+
+    pid = fork ();
+    if (-1 == pid) {
+        /* massive failure */
+        perror("fork");
+        va_end(args);
+        close(fd);
+        return false;
+    }
+    else if (0 == pid) {
+        /* with a pid of 0 we are in the child process, let's execute our commands */
+
+        /* duplicate the file descriptor and assign it to the std output descriptor */
+        if (dup2(fd, 1) < 0) {
+            perror("dup2");
+            return false;
+        }
+        close(fd);
+
+        /* save of the full path */
+        char path[PATH_MAX];
+        strcpy(path, command[0]);
+
+        /* cut the full path into the basename only */
+        command[0] = basename(command[0]);
+
+        execv(path, &command[0]);
+
+        exit(1);
+    }
+
+    if (-1 == waitpid (pid, &status, 0)) {
+        /* there was a problem with the child process */
+        va_end(args);
+        return false;
+    }
+
     va_end(args);
+    close(fd);
+
+    if (WIFEXITED (status)) {
+        /* WIFEXITED will be true if the child terminated normally */
+        if (0 == WEXITSTATUS (status))
+            return true;
+    }
+
+    /* the child have not terminated normally we would have returned true already */
     return false;
-    return true;
 }
+
