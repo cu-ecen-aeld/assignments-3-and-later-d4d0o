@@ -2,19 +2,11 @@
 # Assignment 1: finder shell script
 # Author: David Peter
 
-
-# Commands for text style
-BOLD=$(tput bold)
-NORMAL=$(tput sgr0)
-ITALIC=$(tput sitm)
-UNDERLINE=$(tput smul)
-
-
 if [ $# -ne 2 ]
 then
-    echo -e -n "\nusage: finder ${BOLD}FILESDIR SEARCHSTR${NORMAL}\n"
-    echo -e -n "\t${UNDERLINE}FILESDIR${NORMAL}:\tpath to a directory on the filesystem\n"
-    echo -e    "\t${UNDERLINE}SEARCHSTR${NORMAL}:\ttext string which will be searched within these files\n"
+    echo -e -n "\nusage: finder FILESDIR SEARCHSTR\n"
+    echo -e -n "\tFILESDIR:\tpath to a directory on the filesystem\n"
+    echo -e    "\tSEARCHSTR:\ttext string which will be searched within these files\n"
     exit 1
 else
     FILESDIR=$1
