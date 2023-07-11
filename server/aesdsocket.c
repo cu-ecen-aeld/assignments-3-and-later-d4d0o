@@ -125,12 +125,44 @@ int main (int argc, char** argv)
         exit(EXIT_FAILURE);
     }
 
-    // TODO GO IN DAEMON MODE OPTION
+    pid_t pid;
+    int i;
+
+    // Should we go daemon
     if (argc >= 2) {
-        if ( 0 == strcmp(argv[0], "-d") ) {
-            // Yuhuuu Daemonization
-            printf("Let's go Daemon\n");
-            printf("Well... you have to implement it first");
+        if ( 0 == strcmp(argv[1], "-d") ) {
+            // Daemon option required
+            pid = fork ();
+            if (-1 == pid) {
+                perror("Fork");
+                clean_all (&hdl);
+                exit(EXIT_FAILURE);
+            }
+            else if (0 != pid) {
+                clean_all (&hdl);
+                exit (EXIT_SUCCESS);
+            }
+
+            // create new session and process group
+            if (-1 == setsid ()) {
+                clean_all (&hdl);
+                exit(EXIT_FAILURE);
+            }
+
+            // set the working directory to the root directory
+            if (-1 == chdir ("/")) {
+                clean_all (&hdl);
+                exit(EXIT_FAILURE);
+            }
+
+            // close all open files--NR_OPEN is overkill, but works
+            for (i = 0; i <= 2; i++)
+                close (i);
+
+            // redirect fd's 0,1,2 to /dev/null
+            open ("/dev/null", O_RDWR);   // stdin
+            dup (0);                            // stdout
+            dup (0);                            // stderror
         }
     }
 
@@ -154,7 +186,6 @@ int main (int argc, char** argv)
     off_t filepos;
     ssize_t written;
 
-
     struct sockaddr their_addr;
     socklen_t addr_size = sizeof (their_addr);
 
@@ -164,8 +195,6 @@ int main (int argc, char** argv)
     ssize_t count; // will count the quantity read or sent
 
     char *charpt; // will be a pointer on the identified '\n' character position
-
-    int i; // iteration counter of BUFFLEN allocation memory
 
     ssize_t towrite;
 
@@ -197,7 +226,7 @@ int main (int argc, char** argv)
             }
 
             towrite = 0;
-            i = 1;
+            i = 1; // iteration counter of BUFFLEN allocation memory
 
             while( 0 == towrite) {
                 count = recv(hdl.friendfd, (hdl.buffpt + ((i-1)*BUFFLEN)), BUFFLEN, 0);
