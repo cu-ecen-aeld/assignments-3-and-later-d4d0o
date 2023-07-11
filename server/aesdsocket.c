@@ -10,13 +10,13 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <fcntl.h>
-//#include <netinet/in.h>
 #include <arpa/inet.h>
 
 
 #define SOCKPORT    "9000"
-#define BUFFLEN     1024*1024
+#define BUFFLEN     1024
 #define TMPFILE     "/var/tmp/aesdsocketdata"
+#define BACKLOG     10
 
 
 bool signal_to_get_out = false;
@@ -167,7 +167,7 @@ int main (int argc, char** argv)
     }
 
     // Waiting desperately for a friendly call
-    status = listen (hdl.sockfd, 0);
+    status = listen (hdl.sockfd, BACKLOG);
     if (-1 == status) {
         perror("Listen");
         clean_all (&hdl);
