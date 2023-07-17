@@ -1,6 +1,6 @@
 /**
 * @author David Peter
-* A socket with some threads and a daemon trying to escape a crazy temporary file that logs everything they do
+* A bunch of sockets with some threads and a daemon trying to escape a crazy temporary file that logs everything they do
 */
 #include "aesdsocket.h"
 
@@ -8,7 +8,7 @@ static void signal_handler ( int signal_number )
 {
     int err = errno;
 
-    printf("Got signal: %s\n", strsignal (signal_number));
+    DEBUG_LOG("SIGNAL! SIGNAL! SIGNAL! %s {%s}", strsignal (signal_number), __func__);
     if ( signal_number == SIGINT || signal_number == SIGTERM) {
         signal_to_get_out = true;
     }
@@ -17,21 +17,18 @@ static void signal_handler ( int signal_number )
 }
 
 
-
-void * timestamp_thread (void *handlers)
+void * timestamp_thread (void *handler)
 {
-    int success = EXIT_SUCCESS;
-
     time_t  timenow;
-    int rc = 0;
-    ssize_t count = 0;
+    int rc;
+    ssize_t count;
 
-    handlers_t * hdl = (handlers_t *)handlers;
+    handlers_t * hdl = (handlers_t *)handler;
 
     hdl->buffpt = (char *) malloc(TIMEBUFFLEN * sizeof(char));
     if (NULL == hdl->buffpt) {
-        printf("Error timestamp thread: buffer memory allocation\n");
-        END (EXIT_FAILURE);
+        ERROR_LOG("buffer memory allocation {%s}", __func__);
+        goto end;
     }
 
     while ( !signal_to_get_out ) {
@@ -44,93 +41,100 @@ void * timestamp_thread (void *handlers)
         // Locking the file for writing
         rc = pthread_mutex_lock(hdl->pmutex);
         if ( rc != 0 ) {
-            printf("Error timestamp thread: pthread_mutex_lock failed with %d\n", rc);
-            END (EXIT_FAILURE);
+            ERROR_LOG("pthread_mutex_lock failed with %d {%s}", rc, __func__);
+            goto end;
         }
 
+        DEBUG_LOG("%s", hdl->buffpt);
         count = write (*hdl->ptmpfd, hdl->buffpt, strlen(hdl->buffpt));
         if (-1 == count) {
-            perror(" Error timestamp thread in write()");
-            END (EXIT_FAILURE);
+            ERROR_LOG("write problem {%s}", __func__);
+            goto end;
         }
 
         rc = pthread_mutex_unlock(hdl->pmutex);
         if ( rc != 0 ) {
-            printf("Error timestamp thread: pthread_mutex_unlock failed with %d\n", rc);
-            END (EXIT_FAILURE);
+            ERROR_LOG("pthread_mutex_unlock failed with %d {%s}", rc, __func__);
+            goto end;
         }
     }
 
     end:
     if (NULL != hdl->buffpt) {
-        printf("FREE timestamp buffpt\n");
+        DEBUG_LOG("FREE timestamp buffpt {%s}", __func__);
         free(hdl->buffpt);
+        hdl->buffpt = NULL;
     }
 
-    hdl->active = false;
-    exit(success);
+    return NULL;
 }
 
-
-/*
-void clean_all (handlers_t * hdl)
+void initialize_handler (handlers_t * hdl_table, unsigned int threadnumber, pthread_mutex_t * pmutex, int * ptmpfd)
 {
-    signal_to_get_out = true;
-    // tell the threads to exit
-    // got through each thread of the table to clean unfree yet buffers and join the thread
-    if (-1 != hdl->friendfd) {
-        //shutdown(hdl->friendfd, SHUT_RDWR);
-        close ( hdl->friendfd);
-    }
+    hdl_table[threadnumber].pmutex = pmutex;
+    hdl_table[threadnumber].ptmpfd = ptmpfd;
 
-    if (NULL != hdl->buffpt) {
-        free (hdl->buffpt);
-    }
-    //pthread_join (ptimestamp_thrd, NULL);
-
-    // Clean the main / initializer thread buffers and file descriptors
+    hdl_table[threadnumber].pthread = 0;
+    hdl_table[threadnumber].buffpt = NULL;
+    hdl_table[threadnumber].clientfd = -1;
+    hdl_table[threadnumber].clentaddr = NULL;
+}
 
 
-    if (-1 != hdl->tmpfd) {
-        close (hdl->tmpfd);
+void clean_handlers (handlers_t * hdl_table, unsigned int threadcount)
+{
+    for (int i = 0; i < threadcount; i++)
+    {
+        if (0 != hdl_table[i].pthread) {
+            DEBUG_LOG("CANCEL thread #%d {%s}", i, __func__);
+            pthread_cancel(hdl_table[i].pthread);
+
+            DEBUG_LOG("JOINING thread #%d {%s}", i, __func__);
+            pthread_join(hdl_table[i].pthread, NULL);
+
+            hdl_table[i].pthread = 0;
+        }
+
+        if (NULL != hdl_table[i].buffpt) {
+            DEBUG_LOG("FREE buffpt thread #%d {%s}", i, __func__);
+            free(hdl_table[i].buffpt);
+            hdl_table[i].buffpt = NULL;
+        }
+
+        if (-1 != hdl_table[i].clientfd) {
+            DEBUG_LOG("SHUTDOWN clientfd thread #%d {%s}", i, __func__);
+            shutdown(hdl_table[i].clientfd, SHUT_RDWR);
+            hdl_table[i].clientfd = -1;
+        }
     }
 }
-*/
 
 
 int main (int argc, char** argv)
 {
     int success = EXIT_SUCCESS;
-    int status = 0;
+    int status;
 
-    /* handlers_t * hdl_table = NULL; */ /*{ .logopen=false,
-                       .tmpfd=-1,
-                       .servinfo=NULL,
-                       .sockfd=-1,
-                       .friendfd=-1,
-                       .buffpt=NULL,
-                       .mutex=PTHREAD_MUTEX_INITIALIZER};*/
+    unsigned int threadnumber = 0;
 
+    // [1] Things to free or close are numbered with '[]'
     openlog (NULL, 0, LOG_USER);
-
-
 
     // Signal management
     struct sigaction new_action;
     memset(&new_action, 0, sizeof(struct sigaction));
     new_action.sa_handler=signal_handler;
     if( sigaction(SIGTERM, &new_action, NULL) != 0 ) {
-        printf("Error %d (%s) registering for SIGTERM",errno,strerror(errno));
-        END (EXIT_FAILURE)
+        ERROR_LOG("errno %d (%s) registering for SIGTERM {%s}",errno,strerror(errno), __func__);
+        END (EXIT_FAILURE);
     }
     if( sigaction(SIGINT, &new_action, NULL) ) {
-        printf("Error %d (%s) registering for SIGINT",errno,strerror(errno));
-        END (EXIT_FAILURE)
+        ERROR_LOG("errno %d (%s) registering for SIGINT {%s}",errno,strerror(errno), __func__);
+        END (EXIT_FAILURE);
     }
 
 
-
-    // Socket preparation
+    // [2] Socket preparation
     struct addrinfo *servinfo = NULL;
     int sockfd = -1;
 
@@ -142,26 +146,27 @@ int main (int argc, char** argv)
 
     status = getaddrinfo (NULL, SOCKPORT, &hints, &servinfo);
     if (0 != status) {
-        fprintf(stderr, "getaddrinfo(): %s\n", gai_strerror(status));
-        END (EXIT_FAILURE)
+        ERROR_LOG("getaddrinfo(): %s {%s}", gai_strerror(status), __func__);
+        END (EXIT_FAILURE);
     }
 
+    // [3]
     sockfd = socket (servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
     if (-1 == sockfd) {
-        perror("Descriptor");
-        END (EXIT_FAILURE)
+        ERROR_LOG("errno %d (%s) getting a socket {%s}",errno,strerror(errno), __func__);
+        END (EXIT_FAILURE);
     }
 
     status = bind (sockfd, servinfo->ai_addr, servinfo->ai_addrlen);
     if (-1 == status) {
-        perror("Bind");
-        END (EXIT_FAILURE)
+        ERROR_LOG("errno %d (%s) binding to the socket {%s}",errno,strerror(errno), __func__);
+        END (EXIT_FAILURE);
     }
 
     status = listen (sockfd, BACKLOG);
     if (-1 == status) {
-        perror("Listen");
-        END (EXIT_FAILURE)
+        ERROR_LOG("errno %d (%s) listening to the socket {%s}",errno,strerror(errno), __func__);
+        END (EXIT_FAILURE);
     }
 
 
@@ -173,22 +178,24 @@ int main (int argc, char** argv)
             // Daemon option required
             pid = fork ();
             if (-1 == pid) {
-                perror("Fork");
-                END (EXIT_FAILURE)
+                ERROR_LOG("errno %d (%s) forking for daemon {%s}",errno,strerror(errno), __func__);
+                END (EXIT_FAILURE);
             }
             else if (0 != pid) { // Parent has to quit
-                END (EXIT_SUCCESS)
+                END (EXIT_SUCCESS);
             }
 
             // Child reset
             // create new session and process group
             if (-1 == setsid ()) {
-                END (EXIT_FAILURE)
+                ERROR_LOG("errno %d (%s) creating daemon session & process group {%s}",errno,strerror(errno), __func__);
+                END (EXIT_FAILURE);
             }
 
             // set the working directory to the root directory
             if (-1 == chdir ("/")) {
-                END (EXIT_FAILURE)
+                ERROR_LOG("errno %d (%s) setting daemon root directory {%s}",errno,strerror(errno), __func__);
+                END (EXIT_FAILURE);
             }
 
             // close all open files--NR_OPEN is overkill, but works
@@ -199,125 +206,179 @@ int main (int argc, char** argv)
             // redirect fd's 0,1,2 to /dev/null
             open ("/dev/null", O_RDWR);   // stdin
             open ("/dev/null", O_RDWR);   // stdout
-            open ("/dev/null", O_RDWR);   // stderror
+            open ("/dev/null", O_RDWR);   // stderr
         }
     }
 
 
-
-    handlers_t * hdl_table = (handlers_t *) malloc(BACKLOG * sizeof (handlers_t));
-    if (NULL == hdl_table) {
-        printf("Handlers table memory allocation error\n");
-        END (EXIT_FAILURE)
-    }
-
-    // messaging file storage creation
-    int tmpfd = open (TMPFILE, O_RDWR | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
+    // [4] messaging file storage creation
+    int tmpfd = -1;
+    tmpfd = open (TMPFILE, O_RDWR | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
     if (-1 == tmpfd) {
-        perror("TMPFILE");
-        END (EXIT_FAILURE)
+        ERROR_LOG("errno %d (%s) opening the tmp file {%s}", errno, strerror(errno), __func__);
+        END (EXIT_FAILURE);
     }
 
+    // file protected by mutex
     pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
-    for (int i = 0; i < BACKLOG; i++)
-    {
-        hdl_table[i].pmutex = &mutex;
-        hdl_table[i].ptmpfd = &tmpfd;
-        hdl_table[i].buffpt = NULL;
-        hdl_table[i].friendfd = -1;
-        hdl_table[i].active = true;
+
+    // [5] Threads, buffers, and descriptors structure table
+    // The tmp file and the mutex address will be passed to everybody and can be cleaned or reset by anybody
+    // The table will collect memory buffer and socket descriptor for further cleanup
+    handlers_t * hdl_table = NULL;
+    hdl_table = (handlers_t *) malloc((BACKLOG+1) * sizeof (handlers_t));
+    if (NULL == hdl_table) {
+        ERROR_LOG("handlers_t table memory allocation {%s}", __func__);
+        END (EXIT_FAILURE);
     }
 
-    pthread_t ptimestamp_thrd = 0;
-    status = pthread_create (&ptimestamp_thrd, NULL, timestamp_thread, (void *) &hdl_table[0]);
+    // the 1st thread created is reserved for the 10 sec timestamp
+    threadnumber = 0;
+    initialize_handler (hdl_table, threadnumber, &mutex, &tmpfd);
+
+    status = pthread_create (&hdl_table[0].pthread, NULL, timestamp_thread, (void *) &hdl_table[0]);
     if (0 != status) {
-        printf("Error creation of timestamp thread: code %d", status);
-        END (EXIT_FAILURE)
+        ERROR_LOG("creation of timestamp thread code %d {%s}", status, __func__);
+        END (EXIT_FAILURE);
     }
 
+    /*
+     * timer_create even after a call to timer_delete was generating a leakage report in valgrind
+     *
+    timer_t timerid;
 
+    struct sigevent sev;
+    sev.sigev_notify = SIGEV_THREAD;
+    sev.sigev_notify_function = timer_thread;
+    sev.sigev_value.sival_ptr = &hdl_table[0];
+
+    status = timer_create (CLOCK_REALTIME, &sev, &timerid);
+    if (0 != status) {
+        ERROR_LOG("errno %d (%s) timer_create {%s}", errno, strerror(errno), __func__);
+        END (EXIT_FAILURE);
+    }
+
+    struct itimerspec itimerspec;
+    memset(&itimerspec, 0, sizeof(struct itimerspec));
+    itimerspec.it_value.tv_sec = 10;
+    itimerspec.it_interval.tv_sec = 10;
+
+    status = timer_settime(timerid, TIMER_ABSTIME, &itimerspec, NULL );
+    if (0 != status) {
+        ERROR_LOG("errno %d (%s) timer_settime {%s}", errno, strerror(errno), __func__);
+        END (EXIT_FAILURE);
+    }
+    */
+
+
+    // [5'] Accept continuously new connections and start for each for one a new server-client applicative thread
     struct sockaddr their_addr;
     socklen_t addr_size = sizeof (their_addr);
 
-    // Accept connections and start the server client applications
     while ( !signal_to_get_out ) {
 
-        // Welcome to my friend
-        memset(&their_addr, 0, addr_size);
+        // handlers table reallocation to prepare for a new applicative thread launched by accepting a connection
+        threadnumber++;
+        initialize_handler (hdl_table, threadnumber, &mutex, &tmpfd);
 
+
+        memset(&their_addr, 0, addr_size);
         status = accept(sockfd, &their_addr, &addr_size);
         if (-1 == status) {
-            perror("Accept");
+            if(EINTR == errno){
+                DEBUG_LOG("errno %d (%s) catch of EINTR in accept() {%s}", errno, strerror(errno), __func__);
+                END (EXIT_SUCCESS);
+            }
+            if(signal_to_get_out){
+                DEBUG_LOG("errno %d (%s) catch of EINTR in accept() [I had treated it] {%s}", errno, strerror(errno), __func__);
+                END (EXIT_SUCCESS);
+            }
+            ERROR_LOG("errno %d (%s) accepting socket {%s}", errno, strerror(errno), __func__);
             END (EXIT_FAILURE);
         }
 
-        char * client_addr = inet_ntoa( ((struct sockaddr_in *)&their_addr)->sin_addr );
+        hdl_table[threadnumber].clientfd = status;
+        hdl_table[threadnumber].clentaddr = inet_ntoa( ((struct sockaddr_in *)&their_addr)->sin_addr );
 
-        server_client_app (status, client_addr, tmpfd, &mutex);
+        status = pthread_create (&hdl_table[threadnumber].pthread, NULL, server_client_app, (void *) &hdl_table[threadnumber]);
+        if (0 != status) {
+            ERROR_LOG("creation of server/client app thread code %d {%s}", status, __func__);
+            END (EXIT_FAILURE);
+        }
     }
 
 
     // Exit cleanup management
     end:
-    printf ("Goodbye\n");
+    DEBUG_LOG("GOODBYE :)");
 
-    //clean_all (&hdl);
+    // [5]
+    if (NULL != hdl_table) {
+        clean_handlers(hdl_table, threadnumber + 1);
 
+        DEBUG_LOG("FREE hdl_table {%s}", __func__);
+        free(hdl_table);
+        hdl_table = NULL;
+    }
+
+    // [4]
+    DEBUG_LOG("CLOSE tmp file {%s}", __func__);
     close (tmpfd);
+    tmpfd = -1;
 
-    free(hdl_table);
-    printf("FREE hdl_table");
-
+    // [3]
     if (-1 != sockfd) {
-        //shutdown(hdl->sockfd, SHUT_RDWR);
-        close (sockfd);
+        DEBUG_LOG("SHUTDOWN socketfd {%s}", __func__);
+        shutdown(sockfd, SHUT_RDWR);
+        //close (sockfd);
     }
 
+    // [2]
     if (NULL != servinfo) {
+        DEBUG_LOG("FREE service info {%s}", __func__);
         freeaddrinfo (servinfo);
-        printf("FREE service info");
     }
+
+    // [1]
+    DEBUG_LOG("CLOSE syslog {%s}", __func__);
     closelog();
 
-    if (0 != ptimestamp_thrd)
-        pthread_join(ptimestamp_thrd, NULL);
-
+    DEBUG_LOG("success = %d {%s}", success, __func__);
     exit (success);
 }
 
 
 
-int server_client_app (int friendfd, char * client_addr, int tmpfd, pthread_mutex_t * pmutex)
+void * server_client_app (void * handler /*int friendfd, char * client_addr, int tmpfd, pthread_mutex_t * pmutex*/)
 {
-    int success = EXIT_SUCCESS;
-    int ret = 0;
+    int ret;
 
-    char * buffpt = NULL;
-
-    ssize_t towrite = 0;
-    ssize_t count = 0;
+    ssize_t towrite;
+    ssize_t count;
     int buffercount = 0;
 
     char *charpt; // will be a pointer on the identified '\n' character position
     char *tmppt; // will be a temporary pointer to safely reallocate the buffer
 
-    off_t filepos = 0;
-    ssize_t written = 0;
+    off_t filepos;
+    ssize_t written;
+
+    handlers_t * hdl = (handlers_t *)handler;
 
 
-    syslog (LOG_DEBUG, "Accepted connection from %s", client_addr);
+    syslog (LOG_DEBUG, "Accepted connection from %s", hdl->clentaddr);
 
     // Loop back to receive once response sent
     while ( !signal_to_get_out ) {
         // Loop reception until a '\n' is obtained. Then will write everything to the tmp file
 
-        if (NULL == buffpt) {
-            buffpt = (char *)malloc(BUFFLEN * sizeof(char));
+        if (NULL == hdl->buffpt) {
+            hdl->buffpt = (char *)malloc(BUFFLEN * sizeof(char));
 
-            if (NULL == buffpt) {
-                printf("Error server client app : buffer allocation failed\n");
-                END (EXIT_FAILURE);
+            if (NULL == hdl->buffpt) {
+                ERROR_LOG("buffer dynamic allocation failed {%s}", __func__);
+                goto end;
             }
 
             buffercount = 1;
@@ -327,55 +388,72 @@ int server_client_app (int friendfd, char * client_addr, int tmpfd, pthread_mute
 
         // Reception (blocking) as many buffer length as necessary to obtain a \n before processing
         while( (0 == towrite) && !signal_to_get_out) {
-            count = recv(friendfd, (buffpt + ((buffercount-1)*BUFFLEN)), BUFFLEN, 0);
+            count = recv(hdl->clientfd, (hdl->buffpt + ((buffercount-1)*BUFFLEN)), BUFFLEN, 0);
             if (-1 == count) {
-                printf("Error server client app: receive failed\n");
-                END (EXIT_FAILURE);
+                if(EINTR == errno){
+                    DEBUG_LOG("errno %d (%s) catch of EINTR in recv() {%s}", errno, strerror(errno), __func__);
+                    goto end;
+                }
+                if(signal_to_get_out){
+                    DEBUG_LOG("errno %d (%s) catch of EINTR in recv() [I had treated it] {%s}", errno, strerror(errno), __func__);
+                    goto end;
+                }
+                ERROR_LOG("errno %d (%s) recv() {%s}", errno, strerror(errno), __func__);
+                goto end;
             }
             else if (0 == count) {
                 // client disconnected, let's terminate
-                END (EXIT_SUCCESS)
+                DEBUG_LOG("client disconnected (descriptor %d) {%s}", hdl->clientfd, __func__);
+                goto end;
             }
 
-            charpt = strchr(buffpt, '\n');
+            charpt = strchr(hdl->buffpt, '\n');
             if(NULL == charpt) {
                 // no newline, allocation of another buffer
                 buffercount++;
-                tmppt = realloc(buffpt, (buffercount * BUFFLEN) * sizeof(char));
+                tmppt = realloc(hdl->buffpt, (buffercount * BUFFLEN) * sizeof(char));
                 if (NULL == tmppt) {
-                    printf("Error server client app: buffer reallocation failed\n");
-                    END (EXIT_FAILURE);
+                    ERROR_LOG("buffer reallocation failed {%s}", __func__);
+                    goto end;
                 }
-                buffpt = tmppt;
+                hdl->buffpt = tmppt;
             }
             else {
-                towrite = charpt - buffpt + 1;
+                towrite = charpt - hdl->buffpt + 1;
             }
         }
 
 
         // Append the reading to the file
-        ret = pthread_mutex_lock(pmutex);
+        ret = pthread_mutex_lock(hdl->pmutex);
         if ( ret != 0 ) {
-            printf("Error server client app: pthread_mutex_lock failed with %d\n", ret);
-            END (EXIT_FAILURE);
+            ERROR_LOG("pthread_mutex_lock failed with %d {%s}", ret, __func__);
+            goto end;
         }
 
-        printf("DEBUG - %s", buffpt);
+        printf("DEBUG - %s", hdl->buffpt);
         // Positioning at the end of the tmp file to append data
-        filepos = lseek (tmpfd, 0, SEEK_END);
+        filepos = lseek (*hdl->ptmpfd, 0, SEEK_END);
         if (-1 == filepos) {
-            perror("Error server client app: lseek() EOF");
-            END (EXIT_FAILURE);
+            ERROR_LOG("errno %d (%s) lseek() EOF {%s}", errno, strerror(errno), __func__);
+            goto end;
         }
 
         // Write buffer to the file managing potential incomplete write
-        tmppt = buffpt;
+        tmppt = hdl->buffpt;
         while(towrite > 0) {
-            count = write (tmpfd, tmppt, towrite);
+            count = write (*hdl->ptmpfd, tmppt, towrite);
             if (-1 == count) {
-                perror("Error server client app: write()");
-                END (EXIT_FAILURE);
+                if(EINTR == errno){
+                    DEBUG_LOG("errno %d (%s) catch of EINTR in write() {%s}", errno, strerror(errno), __func__);
+                    goto end;
+                }
+                if(signal_to_get_out){
+                    DEBUG_LOG("errno %d (%s) catch of EINTR in write() [I had treated it] {%s}", errno, strerror(errno), __func__);
+                    goto end;
+                }
+                ERROR_LOG("errno %d (%s) write() {%s}", errno, strerror(errno), __func__);
+                goto end;
             }
             tmppt += count;
             towrite -= count;
@@ -383,38 +461,38 @@ int server_client_app (int friendfd, char * client_addr, int tmpfd, pthread_mute
 
 
         // Read and send back the complete file
-        memset(buffpt, 0, (buffercount * BUFFLEN) * sizeof(char));
+        memset(hdl->buffpt, 0, (buffercount * BUFFLEN) * sizeof(char));
 
         // Current position is the end of file, how much do we have to send ? Storing that in {count}
 
-        count = lseek (tmpfd, 0, SEEK_CUR);
+        count = lseek (*hdl->ptmpfd, 0, SEEK_CUR);
         if (-1 == count) {
-            perror("Error server client app: lseek() CURRENT");
-            END (EXIT_FAILURE);
+            ERROR_LOG("errno %d (%s) lseek() CURR {%s}", errno, strerror(errno), __func__);
+            goto end;
         }
 
         // Positioning at the beginning to send back the full content
-        filepos = lseek (tmpfd, 0, SEEK_SET);
+        filepos = lseek (*hdl->ptmpfd, 0, SEEK_SET);
         if (-1 == filepos) {
-            perror("Error server client app: lseek() START");
-            END (EXIT_FAILURE);
+            ERROR_LOG("errno %d (%s) lseek() START {%s}", errno, strerror(errno), __func__);
+            goto end;
         }
 
         while(count > 0) {
-            filepos = read (tmpfd, buffpt, (count <= BUFFLEN) ? count : BUFFLEN);
+            filepos = read (*hdl->ptmpfd, hdl->buffpt, (count <= BUFFLEN) ? count : BUFFLEN);
             if (-1 == filepos) {
                 perror("Error server client app: read()");
-                END (EXIT_FAILURE);
+                goto end;
             }
 
             count -= filepos;
 
-            tmppt = buffpt;
+            tmppt = hdl->buffpt;
             while(filepos > 0) {
-                written = send(friendfd, tmppt, filepos, 0);
+                written = send(hdl->clientfd, tmppt, filepos, 0);
                 if (-1 == written) {
                     perror("Error server client app: Send");
-                    END (EXIT_FAILURE);
+                    goto end;
                 }
 
                 tmppt += written;
@@ -422,28 +500,31 @@ int server_client_app (int friendfd, char * client_addr, int tmpfd, pthread_mute
             }
         }
 
-        fsync(tmpfd);
+        fsync(*hdl->ptmpfd);
 
-        ret = pthread_mutex_unlock(pmutex);
+        ret = pthread_mutex_unlock(hdl->pmutex);
         if ( ret != 0 ) {
             printf("Error server client app: pthread_mutex_unlock failed with %d\n", ret);
-            END (EXIT_FAILURE);
+            goto end;
         }
 
-        free(buffpt);
-        buffpt = NULL;
+        free(hdl->buffpt);
+        hdl->buffpt = NULL;
     }
-
 
     end:
-    printf("FREE server buffpt");
-    if (NULL != buffpt) {
-        free(buffpt);
+    if (NULL != hdl->buffpt) {
+        DEBUG_LOG("FREE buffpt {%s}", __func__);
+        free(hdl->buffpt);
+        hdl->buffpt = NULL;
     }
 
-    //shutdown(friendfd, SHUT_RDWR);
-    close(friendfd);
+    if (-1 != hdl->clientfd) {
+        DEBUG_LOG("SHUTDOWN clientfd {%s}", __func__);
+        shutdown(hdl->clientfd, SHUT_RDWR);
+        hdl->clientfd = -1;
+    }
 
-    syslog (LOG_DEBUG, "Closed connection from %s", client_addr);
-    return (success);
+    syslog (LOG_DEBUG, "Closed connection from %s", hdl->clentaddr);
+    return NULL;
 }
