@@ -25,7 +25,7 @@
 #define SOCKPORT    "9000"
 #define BUFFLEN     1024
 #define TMPFILE     "/var/tmp/aesdsocketdata"
-#define BACKLOG     10
+#define BACKLOG     20
 
 #define TIMEBUFFLEN 64
 #define TIMEBUFFFORMAT "timestamp:%a, %d %b %Y %T %z\n"

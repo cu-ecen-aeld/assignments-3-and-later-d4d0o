@@ -102,8 +102,8 @@ void clean_handlers (handlers_t * hdl_table, unsigned int threadcount)
         }
 
         if (-1 != hdl_table[i].clientfd) {
-            DEBUG_LOG("SHUTDOWN clientfd thread #%d {%s}", i, __func__);
-            shutdown(hdl_table[i].clientfd, SHUT_RDWR);
+            DEBUG_LOG("CLOSE clientfd thread #%d {%s}", i, __func__);
+            close(hdl_table[i].clientfd);
             hdl_table[i].clientfd = -1;
         }
     }
@@ -182,7 +182,8 @@ int main (int argc, char** argv)
                 END (EXIT_FAILURE);
             }
             else if (0 != pid) { // Parent has to quit
-                END (EXIT_SUCCESS);
+                // watchout DO NOT cleanup
+                exit(EXIT_SUCCESS);
             }
 
             // Child reset
@@ -520,8 +521,8 @@ void * server_client_app (void * handler /*int friendfd, char * client_addr, int
     }
 
     if (-1 != hdl->clientfd) {
-        DEBUG_LOG("SHUTDOWN clientfd {%s}", __func__);
-        shutdown(hdl->clientfd, SHUT_RDWR);
+        DEBUG_LOG("CLOSE clientfd {%s}", __func__);
+        close(hdl->clientfd);
         hdl->clientfd = -1;
     }
 
