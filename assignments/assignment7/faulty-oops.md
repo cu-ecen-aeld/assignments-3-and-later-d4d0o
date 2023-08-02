@@ -1,33 +1,17 @@
-Entering the command:
-
-```
-echo “hello_world” > /dev/faulty
-```
-
-result in a kernel oops (see bellow the oops details). 
-
+Entering the command:```echo “hello_world” > /dev/faulty```
+result in a kernel oops (see bellow the oops details).
+<br/><br/><br/>
 Indication of an access of memory 0, NULL pointer is indicated by
+```NULL pointer dereference at virtual address 0000000000000000```
+<br/><br/><br/>
+The module faulty and the function faulty_write are given by ```pc : faulty_write+0x10/0x20 \[faulty\]```
 
-> NULL pointer dereference at virtual address 0000000000000000
-
-The module faulty and the function faulty_write are given by
-
-> pc : faulty_write+0x10/0x20 \[faulty\]
-
-::: info
 *16 (0x10) bytes into the function faulty_write, which is 32 (0x20) bytes long*
-
-:::
-
-Which help to point in **ssize_t faulty_write (...** the following line:
-
-```
-(int *)0 = 0;
-```
-
+<br/><br/><br/>
+Which help to point in **ssize_t faulty_write (...){}** the following line:  ```(int *)0 = 0;```
+<br/><br/><br/>
 ##### Kernel oops details:
-
-::: warn
+```
 Unable to handle kernel NULL pointer dereference at virtual address 0000000000000000
 Mem abort info:
 ESR = 0x0000000096000045
@@ -70,5 +54,4 @@ el0t_64_sync_handler+0xbc/0x140
 el0t_64_sync+0x18c/0x190
 Code: d2800001 d2800000 d503233f d50323bf (b900003f)
 \---\[ end trace 0000000000000000 \]---
-
-:::
+```
