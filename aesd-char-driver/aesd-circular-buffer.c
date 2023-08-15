@@ -60,10 +60,24 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 * new start location.
 * Any necessary locking must be handled by the caller
 * Any memory referenced in @param add_entry must be allocated by and/or must have a lifetime managed by the caller.
+* @return NULL or, if an existing entry at out_offs was replaced, the buffptr for the entry which was replaced (for memory free usage)
 */
-void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
+const char * aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
-    // Add a new entry at the indicated table Input index
+    const char *erased_buffptr = NULL;
+
+    // If the buffer was already declared full (the Input table index reached back to Output position), the oldest position
+    // Output will be overwritten. Requiring to increment Output index to the following position (the futur new oldest), and also
+    // to return the pointer of the overwritten string in order to free its memory.
+    if (buffer->full == true) {
+        erased_buffptr = buffer->entry[buffer->out_offs].buffptr;
+        
+	// Next Output table index to point the new oldest
+        if (++buffer->out_offs == AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
+            buffer->out_offs = 0;
+    }
+
+    // Add a the entry at the indicated table Input index
     memcpy(&(buffer->entry[buffer->in_offs]), add_entry, sizeof(struct aesd_buffer_entry));
     //buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
     //buffer->entry[buffer->in_offs].size = add_entry->size;
@@ -71,18 +85,12 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
     // Set to the next Input table index
     if (++buffer->in_offs == AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
         buffer->in_offs = 0;
-
-    // If the buffer was declared already full, the oldest table index pointed by Output has just been erased
-    // Output has to be set to the next position to the new oldest value
-    if (buffer->full == true) {
-        // Next Output table index
-        if (++buffer->out_offs == AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
-            buffer->out_offs = 0;
-    }
-
+    
     // If the next Input index folded back to the oldest Output position the buffer is declared full
     if (buffer->in_offs == buffer->out_offs)
         buffer->full = true;
+
+    return erased_buffptr;
 }
 
 /**
