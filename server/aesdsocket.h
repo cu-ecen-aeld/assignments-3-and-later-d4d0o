@@ -24,16 +24,28 @@
 
 #define SOCKPORT    "9000"
 #define BUFFLEN     1024
-#define TMPFILE     "/var/tmp/aesdsocketdata"
 #define BACKLOG     20
 
 #define TIMEBUFFLEN 64
 #define TIMEBUFFFORMAT "timestamp:%a, %d %b %Y %T %z\n"
 
 
-//#define DEBUG_LOG(msg,...)
-#define DEBUG_LOG(msg,...) printf(msg "\n" , ##__VA_ARGS__)
-#define ERROR_LOG(msg,...) printf("ERROR: " msg "\n" , ##__VA_ARGS__)
+#define USE_AESD_CHAR_DEVICE 1  //Remove comment on this line to enable char device driver log
+
+#undef TMPFILE             // undef it, just in case
+#ifdef USE_AESD_CHAR_DEVICE
+#  define TMPFILE     "/dev/aesdchar"
+#else
+#  define TMPFILE     "/var/tmp/aesdsocketdata"
+#endif
+
+
+#define DEBUG_LOG(msg,...)
+//#define DEBUG_LOG(msg,...) printf(msg "\n" , ##__VA_ARGS__)
+
+#define ERROR_LOG(msg,...)
+//#define ERROR_LOG(msg,...) printf("ERROR: " msg "\n" , ##__VA_ARGS__)
+
 #define END(state) success=state ; goto end
 
 

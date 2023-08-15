@@ -16,7 +16,7 @@ static void signal_handler ( int signal_number )
     errno = err;
 }
 
-
+#ifdef DO_TIMESTAMP
 void * timestamp_thread (void *handler)
 {
     time_t  timenow;
@@ -68,6 +68,7 @@ void * timestamp_thread (void *handler)
 
     return NULL;
 }
+#endif
 
 void initialize_handler (handlers_t * hdl_table, unsigned int threadnumber, pthread_mutex_t * pmutex, int * ptmpfd)
 {
@@ -211,14 +212,15 @@ int main (int argc, char** argv)
         }
     }
 
-
     // [4] messaging file storage creation
     int tmpfd = -1;
+#ifndef USE_AESD_CHAR_DEVICE
     tmpfd = open (TMPFILE, O_RDWR | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
     if (-1 == tmpfd) {
         ERROR_LOG("errno %d (%s) opening the tmp file {%s}", errno, strerror(errno), __func__);
         END (EXIT_FAILURE);
     }
+#endif
 
     // file protected by mutex
     pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -234,15 +236,17 @@ int main (int argc, char** argv)
         END (EXIT_FAILURE);
     }
 
+
     // the 1st thread created is reserved for the 10 sec timestamp
     threadnumber = 0;
     initialize_handler (hdl_table, threadnumber, &mutex, &tmpfd);
-
+#ifdef DO_TIMESTAMP
     status = pthread_create (&hdl_table[0].pthread, NULL, timestamp_thread, (void *) &hdl_table[0]);
     if (0 != status) {
         ERROR_LOG("creation of timestamp thread code %d {%s}", status, __func__);
         END (EXIT_FAILURE);
     }
+#endif
 
     /*
      * timer_create even after a call to timer_delete was generating a leakage report in valgrind
@@ -323,10 +327,12 @@ int main (int argc, char** argv)
         hdl_table = NULL;
     }
 
+#ifndef USE_AESD_CHAR_DEVICE
     // [4]
     DEBUG_LOG("CLOSE tmp file {%s}", __func__);
     close (tmpfd);
     tmpfd = -1;
+#endif
 
     // [3]
     if (-1 != sockfd) {
@@ -432,18 +438,29 @@ void * server_client_app (void * handler /*int friendfd, char * client_addr, int
             goto end;
         }
 
-        printf("DEBUG - %s", hdl->buffpt);
+#ifndef USE_AESD_CHAR_DEVICE
         // Positioning at the end of the tmp file to append data
         filepos = lseek (*hdl->ptmpfd, 0, SEEK_END);
         if (-1 == filepos) {
             ERROR_LOG("errno %d (%s) lseek() EOF {%s}", errno, strerror(errno), __func__);
             goto end;
         }
-
+#else
+        // open char device, write buffer, and close it
+        DEBUG_LOG("open %s", TMPFILE);
+	*hdl->ptmpfd = open (TMPFILE, O_RDWR | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
+        if (-1 == *hdl->ptmpfd) {
+            ERROR_LOG("errno %d (%s) opening the tmp file {%s}", errno, strerror(errno), __func__);
+            goto end;
+        }
+#endif
+        DEBUG_LOG("write %s", TMPFILE);
         // Write buffer to the file managing potential incomplete write
         tmppt = hdl->buffpt;
         while(towrite > 0) {
+	    DEBUG_LOG("towrite %zu", towrite);
             count = write (*hdl->ptmpfd, tmppt, towrite);
+	    DEBUG_LOG("count %s", count);
             if (-1 == count) {
                 if(EINTR == errno){
                     DEBUG_LOG("errno %d (%s) catch of EINTR in write() {%s}", errno, strerror(errno), __func__);
@@ -459,13 +476,17 @@ void * server_client_app (void * handler /*int friendfd, char * client_addr, int
             tmppt += count;
             towrite -= count;
         }
-
+#ifdef USE_AESD_CHAR_DEVICE
+	DEBUG_LOG("close %s", TMPFILE);
+        close (*hdl->ptmpfd);
+        *hdl->ptmpfd = -1;
+#endif
 
         // Read and send back the complete file
         memset(hdl->buffpt, 0, (buffercount * BUFFLEN) * sizeof(char));
 
+#ifndef USE_AESD_CHAR_DEVICE
         // Current position is the end of file, how much do we have to send ? Storing that in {count}
-
         count = lseek (*hdl->ptmpfd, 0, SEEK_CUR);
         if (-1 == count) {
             ERROR_LOG("errno %d (%s) lseek() CURR {%s}", errno, strerror(errno), __func__);
@@ -478,6 +499,16 @@ void * server_client_app (void * handler /*int friendfd, char * client_addr, int
             ERROR_LOG("errno %d (%s) lseek() START {%s}", errno, strerror(errno), __func__);
             goto end;
         }
+#else
+        // open char device, write buffer, and close it
+        *hdl->ptmpfd = open (TMPFILE, O_RDWR | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
+        if (-1 == *hdl->ptmpfd) {
+            ERROR_LOG("errno %d (%s) opening the tmp file {%s}", errno, strerror(errno), __func__);
+            goto end;
+        }
+
+	count = BUFFLEN;
+#endif
 
         while(count > 0) {
             filepos = read (*hdl->ptmpfd, hdl->buffpt, (count <= BUFFLEN) ? count : BUFFLEN);
@@ -485,7 +516,12 @@ void * server_client_app (void * handler /*int friendfd, char * client_addr, int
                 perror("Error server client app: read()");
                 goto end;
             }
-
+	    else if (0 == filepos) {
+                // nothing left to read
+                count = 0;
+                break;
+            }
+            
             count -= filepos;
 
             tmppt = hdl->buffpt;
@@ -500,8 +536,12 @@ void * server_client_app (void * handler /*int friendfd, char * client_addr, int
                 filepos -= written;
             }
         }
-
+#ifndef USE_AESD_CHAR_DEVICE
         fsync(*hdl->ptmpfd);
+#else
+	close (*hdl->ptmpfd);
+        *hdl->ptmpfd = -1;
+#endif
 
         ret = pthread_mutex_unlock(hdl->pmutex);
         if ( ret != 0 ) {
