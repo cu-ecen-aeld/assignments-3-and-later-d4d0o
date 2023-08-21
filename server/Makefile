@@ -11,7 +11,7 @@ all: $(TARGET)
 
 
 $(TARGET): $(TARGET).c
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CC) $(CFLAGS) $(INC) -o $@ $^ $(LDFLAGS)
 
 clean:
 	rm -f $(TARGET).o

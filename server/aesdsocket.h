@@ -40,11 +40,11 @@
 #endif
 
 
-#define DEBUG_LOG(msg,...)
-//#define DEBUG_LOG(msg,...) printf(msg "\n" , ##__VA_ARGS__)
+//#define DEBUG_LOG(msg,...)
+#define DEBUG_LOG(msg,...) printf(msg "\n" , ##__VA_ARGS__)
 
-#define ERROR_LOG(msg,...)
-//#define ERROR_LOG(msg,...) printf("ERROR: " msg "\n" , ##__VA_ARGS__)
+//#define ERROR_LOG(msg,...)
+#define ERROR_LOG(msg,...) printf("ERROR: " msg "\n" , ##__VA_ARGS__)
 
 #define END(state) success=state ; goto end
 

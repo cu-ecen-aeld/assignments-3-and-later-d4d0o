@@ -3,6 +3,7 @@
 * A bunch of sockets with some threads and a daemon trying to escape a crazy temporary file that logs everything they do
 */
 #include "aesdsocket.h"
+#include "aesd_ioctl.h"
 
 static void signal_handler ( int signal_number )
 {
@@ -402,7 +403,7 @@ void * server_client_app (void * handler /*int friendfd, char * client_addr, int
                     goto end;
                 }
                 if(signal_to_get_out){
-                    DEBUG_LOG("errno %d (%s) catch of EINTR in recv() [I had treated it] {%s}", errno, strerror(errno), __func__);
+                    DEBUG_LOG("errno %d (%s) catch of EINTR in recv() [I treated it] {%s}", errno, strerror(errno), __func__);
                     goto end;
                 }
                 ERROR_LOG("errno %d (%s) recv() {%s}", errno, strerror(errno), __func__);
@@ -430,8 +431,6 @@ void * server_client_app (void * handler /*int friendfd, char * client_addr, int
             }
         }
 
-
-        // Append the reading to the file
         ret = pthread_mutex_lock(hdl->pmutex);
         if ( ret != 0 ) {
             ERROR_LOG("pthread_mutex_lock failed with %d {%s}", ret, __func__);
@@ -446,44 +445,46 @@ void * server_client_app (void * handler /*int friendfd, char * client_addr, int
             goto end;
         }
 #else
-        // open char device, write buffer, and close it
-        DEBUG_LOG("open %s", TMPFILE);
-	*hdl->ptmpfd = open (TMPFILE, O_RDWR | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
-        if (-1 == *hdl->ptmpfd) {
-            ERROR_LOG("errno %d (%s) opening the tmp file {%s}", errno, strerror(errno), __func__);
-            goto end;
-        }
-#endif
-        DEBUG_LOG("write %s", TMPFILE);
-        // Write buffer to the file managing potential incomplete write
-        tmppt = hdl->buffpt;
-        while(towrite > 0) {
-	    DEBUG_LOG("towrite %zu", towrite);
-            count = write (*hdl->ptmpfd, tmppt, towrite);
-	    DEBUG_LOG("count %s", count);
-            if (-1 == count) {
-                if(EINTR == errno){
-                    DEBUG_LOG("errno %d (%s) catch of EINTR in write() {%s}", errno, strerror(errno), __func__);
-                    goto end;
-                }
-                if(signal_to_get_out){
-                    DEBUG_LOG("errno %d (%s) catch of EINTR in write() [I had treated it] {%s}", errno, strerror(errno), __func__);
-                    goto end;
-                }
-                ERROR_LOG("errno %d (%s) write() {%s}", errno, strerror(errno), __func__);
+        if (NULL == strstr(hdl->buffpt, AESDCHAR_SEEK_CMD)) {
+            // if it' s not an ioctl command open char device, write buffer, and close
+            DEBUG_LOG("not ioctl open %s", TMPFILE);
+	    *hdl->ptmpfd = open (TMPFILE, O_RDWR | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
+            if (-1 == *hdl->ptmpfd) {
+                ERROR_LOG("errno %d (%s) opening the tmp file {%s}", errno, strerror(errno), __func__);
                 goto end;
             }
-            tmppt += count;
-            towrite -= count;
-        }
+#endif
+            DEBUG_LOG("write %s", TMPFILE);
+            // Write buffer to the file managing potential incomplete write
+            tmppt = hdl->buffpt;
+            while(towrite > 0) {
+	        DEBUG_LOG("towrite %zu", towrite);
+                count = write (*hdl->ptmpfd, tmppt, towrite);
+	        DEBUG_LOG("count %zu", count);
+                if (-1 == count) {
+                    if(EINTR == errno){
+                        DEBUG_LOG("errno %d (%s) catch of EINTR in write() {%s}", errno, strerror(errno), __func__);
+                        goto end;
+                    }
+                    if(signal_to_get_out){
+                        DEBUG_LOG("errno %d (%s) catch of EINTR in write() [I had treated it] {%s}", errno, strerror(errno), __func__);
+                        goto end;
+                    }
+                    ERROR_LOG("errno %d (%s) write() {%s}", errno, strerror(errno), __func__);
+                    goto end;
+                }
+                tmppt += count;
+                towrite -= count;
+            }
 #ifdef USE_AESD_CHAR_DEVICE
-	DEBUG_LOG("close %s", TMPFILE);
-        close (*hdl->ptmpfd);
-        *hdl->ptmpfd = -1;
+
+	    DEBUG_LOG("close %s", TMPFILE);
+            close (*hdl->ptmpfd);
+            *hdl->ptmpfd = -1;
 #endif
 
         // Read and send back the complete file
-        memset(hdl->buffpt, 0, (buffercount * BUFFLEN) * sizeof(char));
+        //memset(hdl->buffpt, 0, (buffercount * BUFFLEN) * sizeof(char));
 
 #ifndef USE_AESD_CHAR_DEVICE
         // Current position is the end of file, how much do we have to send ? Storing that in {count}
@@ -500,15 +501,32 @@ void * server_client_app (void * handler /*int friendfd, char * client_addr, int
             goto end;
         }
 #else
-        // open char device, write buffer, and close it
+	}
+
+	// open char device, write buffer, and close it
         *hdl->ptmpfd = open (TMPFILE, O_RDWR | O_CREAT | O_TRUNC, S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
         if (-1 == *hdl->ptmpfd) {
             ERROR_LOG("errno %d (%s) opening the tmp file {%s}", errno, strerror(errno), __func__);
             goto end;
         }
 
+        if (NULL != strstr(hdl->buffpt, AESDCHAR_SEEK_CMD)) {
+            struct aesd_seekto seek_ioctl = {0, 0};
+            
+	    DEBUG_LOG("ioctl string: %s", hdl->buffpt);
+            
+	    sscanf(hdl->buffpt, AESDCHAR_SEEK_CMD "%i,%i\n", &seek_ioctl.write_cmd, &seek_ioctl.write_cmd_offset);
+            
+	    DEBUG_LOG("ioctl cmd: %i, offset: %i", seek_ioctl.write_cmd, seek_ioctl.write_cmd_offset);
+
+            ioctl(*hdl->ptmpfd, AESDCHAR_IOCSEEKTO, &seek_ioctl);
+	}
+
 	count = BUFFLEN;
 #endif
+
+	// Read and send back the complete file
+        memset(hdl->buffpt, 0, (buffercount * BUFFLEN) * sizeof(char));
 
         while(count > 0) {
             filepos = read (*hdl->ptmpfd, hdl->buffpt, (count <= BUFFLEN) ? count : BUFFLEN);
