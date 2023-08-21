@@ -16,6 +16,26 @@
 
 #include "aesd-circular-buffer.h"
 
+
+size_t aesd_circular_buffer_size(struct aesd_circular_buffer *buffer)
+{
+    size_t size = 0;
+    uint8_t index = buffer->out_offs;
+
+    // Well if the buffer is empty it's kinda easy!
+    if ( (false == buffer->full) && (buffer->in_offs == buffer->out_offs) ) {
+        return 0;
+    }
+
+    do {
+        size += buffer->entry[index++].size;
+    }
+    while( index < buffer->in_offs );
+
+    return size;
+}
+
+
 /**
  * @param buffer the buffer to search for corresponding offset.  Any necessary locking must be performed by caller.
  * @param char_offset the position to search for in the buffer list, describing the zero referenced
@@ -26,8 +46,7 @@
  * @return the struct aesd_buffer_entry structure representing the position described by char_offset, or
  * NULL if this position is not available in the buffer (not enough data is written).
  */
-struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct aesd_circular_buffer *buffer,
-            size_t char_offset, size_t *entry_offset_byte_rtn )
+struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct aesd_circular_buffer *buffer, size_t char_offset, size_t *entry_offset_byte_rtn )
 {
     // If the buffer empty there is nothing to report
     if ( (false == buffer->full) && (buffer->in_offs == buffer->out_offs) ) {
